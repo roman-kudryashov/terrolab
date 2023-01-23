@@ -48,3 +48,35 @@ variable "subnet_settings" {
     }
   }
 }
+
+variable "bastion_sg" {
+  default = {
+    name = "bastion"
+    ingress = {
+    ssh = {
+      from_port        = 22
+      to_port          = 22
+      protocol         = "tcp"
+      self             = true
+      cidr_blocks      = ["0.0.0.0/0"]
+      description      = "Inbound ssh traffic"
+    }
+  }
+  egress = {
+    global = {
+      from_port        = 0
+      to_port          = 0
+      protocol         = "-1"
+      self             = false
+      security_groups  = []
+      prefix_list_ids  = []
+      cidr_blocks      = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = []
+      description      = "Outbound traffic"
+    }
+  }
+    tags = {
+      "Description" = "allows access to bastion"
+    }
+  }
+}
