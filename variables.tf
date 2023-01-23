@@ -4,7 +4,7 @@ variable "region" {
 
 variable "default_tags" {
   default = {
-    "Project" = "terraform_lab"
+    "Project" = "terraform-lab"
     "Managed_by" = "terraform"
   }
 }
@@ -27,4 +27,24 @@ variable "vpc_enable_dns_hostnames" {
 
 variable "vpc_enable_classiclink" {
   default = false
+}
+
+variable "subnet_settings" {
+  default = {
+    subnet-1 = {
+      az = "a"
+      cidr = "10.10.1.0/24"
+      map_public_ip_on_launch = true
+    }
+    subnet-2 = {
+      az = "b"
+      cidr = "10.10.2.0/24"
+      map_public_ip_on_launch = true
+    }
+    subnet-3 = {
+      az = "c"
+      cidr = "10.10.3.0/24"
+      map_public_ip_on_launch = true
+    }
+  }
 }
