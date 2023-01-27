@@ -260,8 +260,8 @@ variable "tg_settings" {
     health_check_healthy_threshold   = 2
     health_check_unhealthy_threshold = 2
     health_check_interval            = 30
-    health_check_path                = "/ghost"
-    health_check_matcher             = "200,201"
+    health_check_path                = "/ghost/"
+    health_check_matcher             = "200"
   }
 }
 
@@ -280,6 +280,38 @@ variable "ghost_instance_settings" {
     name                    = "ghost"
     disable_api_termination = false
     instance_type           = "t2.micro"
+    ebs_block_device = {
+      "/dev/xvda" = {
+        volume_type           = "gp2"
+        volume_size           = "8"
+        delete_on_termination = true
+      }
+    }
+  }
+}
+
+variable "asg_settings" {
+  default = {
+    name                      = "ghost"
+  min_size                  = 1
+  desired_capacity          = 1
+  max_size                  = 1
+  load_balancer             = true
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+  default_cooldown          = 450
+  create_before_destroy     = true
+  version                   = "$Latest"
+  }
+}
+
+variable "bastion_instance_settings" {
+  default = {
+    name                    = "bastion"
+    disable_api_termination = false
+    associate_public_ip_address = true
+    instance_type           = "t2.micro"
+    source_dest_check = true
     ebs_block_device = {
       root = {
         volume_type           = "gp2"

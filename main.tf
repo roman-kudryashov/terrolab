@@ -431,3 +431,54 @@ resource "aws_launch_template" "lt" {
   }
 
 }
+
+resource "aws_autoscaling_group" "asg" {
+  name                      = join("-", tolist([var.default_tags["Project"], var.asg_settings["name"]]))
+  min_size                  = var.asg_settings["min_size"]
+  desired_capacity          = var.asg_settings["desired_capacity"]
+  max_size                  = var.asg_settings["max_size"]
+  health_check_type         = var.asg_settings["health_check_type"]
+  health_check_grace_period = var.asg_settings["health_check_grace_period"]
+  default_cooldown          = var.asg_settings["default_cooldown"]
+  vpc_zone_identifier       = [for k, v in aws_subnet.public_subnet : v.id]
+  target_group_arns         = [aws_lb_target_group.target-group.id]
+
+  launch_template {
+    id      = aws_launch_template.lt.id
+    version = var.asg_settings["version"]
+  }
+
+}
+
+resource "aws_instance" "bastion" {
+  ami                                  = data.aws_ami.amazon-linux-2.id
+  instance_type                        = var.bastion_instance_settings["instance_type"]
+  key_name                             = aws_key_pair.ssh.key_name
+  vpc_security_group_ids               = [aws_security_group.bastion.id]
+  subnet_id                            = aws_subnet.public_subnet["subnet-1"].id
+  associate_public_ip_address          = var.bastion_instance_settings["associate_public_ip_address"]
+  source_dest_check                    = var.bastion_instance_settings["source_dest_check"]
+
+  root_block_device {
+    volume_type           = var.bastion_instance_settings["ebs_block_device"]["root"]["volume_type"]
+    volume_size           = var.bastion_instance_settings["ebs_block_device"]["root"]["volume_size"]
+    delete_on_termination = var.bastion_instance_settings["ebs_block_device"]["root"]["delete_on_termination"]
+
+    tags = merge(
+      var.default_tags,
+      tomap({
+        "Name" = join("-", concat(tolist([var.default_tags["Project"], var.bastion_instance_settings["name"], "ebs-root"])))
+      })
+    )
+
+  }
+
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", concat(tolist([var.default_tags["Project"], var.bastion_instance_settings["name"], "instance"])))
+    })
+  )
+
+}
