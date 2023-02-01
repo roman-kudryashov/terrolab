@@ -46,8 +46,12 @@ data "template_file" "user-data" {
   template = file("templates/user-data.sh")
 
   vars = {
-    alb_url = aws_lb.loadbalancer.dns_name
-    efs_id  = aws_efs_file_system.efs.id
-    region  = var.region
+    alb_url         = aws_lb.loadbalancer.dns_name
+    efs_id          = aws_efs_file_system.efs.id
+    region          = var.region
+    db_url          = aws_db_instance.rds.address
+    db_user         = var.rds_settings["username"]
+    db_name         = var.rds_settings["dbname"]
+    ssm_db_password = aws_ssm_parameter.secret.name
   }
 }

@@ -592,3 +592,57 @@ resource "aws_security_group" "rds" {
     })
   )
 }
+resource "aws_db_instance" "rds" {
+  identifier              = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+  name                    = var.rds_settings["dbname"]
+  allocated_storage       = var.rds_settings["allocated_storage"]
+  storage_type            = var.rds_settings["storage_type"]
+  engine                  = var.rds_settings["engine"]
+  availability_zone       = var.rds_settings["availability_zone"]
+  engine_version          = var.rds_settings["engine_version"]
+  instance_class          = var.rds_settings["instance_class"]
+  username                = var.rds_settings["username"]
+  password                = random_string.password.result
+  vpc_security_group_ids  = [aws_security_group.rds.id]
+  db_subnet_group_name    = aws_db_subnet_group.rds-subnet-group.name
+  kms_key_id              = aws_kms_key.rds-kms-key.arn
+  parameter_group_name    = aws_db_parameter_group.rds-pg.name
+  storage_encrypted       = var.rds_settings["storage_encrypted"]
+  skip_final_snapshot     = var.rds_settings["skip_final_snapshot"]
+  backup_retention_period = var.rds_settings["backup_retention_period"]
+  backup_window           = var.rds_settings["backup_window"]
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+    })
+  )
+}
+
+resource "aws_db_parameter_group" "rds-pg" {
+  name   = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+  family = var.rds_settings["family"]
+
+  parameter {
+    name  = "general_log"
+    value = 0
+  }
+
+  parameter {
+    name  = "slow_query_log"
+    value = "1"
+  }
+
+  parameter {
+    name  = "long_query_time"
+    value = "2"
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+    })
+  )
+}
