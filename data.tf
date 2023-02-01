@@ -17,7 +17,10 @@ data "aws_iam_policy_document" "policy" {
       "ec2:Describe*",
       "elasticfilesystem:DescribeFileSystems",
       "elasticfilesystem:ClientMount",
-      "elasticfilesystem:ClientWrite"
+      "elasticfilesystem:ClientWrite",
+      "ssm:GetParameter*",
+      "secretsmanager:GetSecretValue",
+      "kms:Decrypt"
 
     ]
     resources = ["*"]

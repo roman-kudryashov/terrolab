@@ -43,6 +43,22 @@ resource "aws_subnet" "public_subnet" {
   )
 }
 
+resource "aws_subnet" "private_subnet" {
+  for_each                = var.private_subnet_settings
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = each.value["cidr"]
+  availability_zone       = "${var.region}${each.value["az"]}"
+  map_public_ip_on_launch = each.value["map_public_ip_on_launch"]
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name"        = join("-", tolist([var.default_tags["Project"], each.key, "private"])),
+      "Description" = "${var.region}${each.value["az"]} private subnet"
+    })
+  )
+}
+
 resource "aws_route_table" "default-public" {
   vpc_id = aws_vpc.this.id
 
@@ -94,6 +110,11 @@ locals {
     }
     global = {
       cidr_blocks = [aws_vpc.this.cidr_block]
+    }
+  }
+  rds_sg = {
+    mysql = {
+      security_groups = [aws_security_group.ec2-pool.id]
     }
   }
 }
@@ -451,13 +472,13 @@ resource "aws_autoscaling_group" "asg" {
 }
 
 resource "aws_instance" "bastion" {
-  ami                                  = data.aws_ami.amazon-linux-2.id
-  instance_type                        = var.bastion_instance_settings["instance_type"]
-  key_name                             = aws_key_pair.ssh.key_name
-  vpc_security_group_ids               = [aws_security_group.bastion.id]
-  subnet_id                            = aws_subnet.public_subnet["subnet-1"].id
-  associate_public_ip_address          = var.bastion_instance_settings["associate_public_ip_address"]
-  source_dest_check                    = var.bastion_instance_settings["source_dest_check"]
+  ami                         = data.aws_ami.amazon-linux-2.id
+  instance_type               = var.bastion_instance_settings["instance_type"]
+  key_name                    = aws_key_pair.ssh.key_name
+  vpc_security_group_ids      = [aws_security_group.bastion.id]
+  subnet_id                   = aws_subnet.public_subnet["subnet-1"].id
+  associate_public_ip_address = var.bastion_instance_settings["associate_public_ip_address"]
+  source_dest_check           = var.bastion_instance_settings["source_dest_check"]
 
   root_block_device {
     volume_type           = var.bastion_instance_settings["ebs_block_device"]["root"]["volume_type"]
@@ -481,4 +502,93 @@ resource "aws_instance" "bastion" {
     })
   )
 
+}
+
+resource "aws_kms_key" "rds-kms-key" {
+  description             = "For RDS"
+  deletion_window_in_days = 10
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+    })
+  )
+}
+
+resource "aws_kms_alias" "kms-rds-alias" {
+  name          = "alias/${var.default_tags["Project"]}/${var.rds_settings["name"]}"
+  target_key_id = aws_kms_key.rds-kms-key.id
+}
+
+resource "random_string" "password" {
+  length           = 16
+  special          = false
+  override_special = "!@#$&"
+}
+
+resource "aws_ssm_parameter" "secret" {
+  name        = "/${var.rds_settings["name"]}/dbpasswd"
+  description = "RDS Ghost password"
+  type        = "SecureString"
+  value       = random_string.password.result
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+    })
+  )
+}
+
+resource "aws_db_subnet_group" "rds-subnet-group" {
+  name        = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+  description = "Ghost RDS"
+  subnet_ids  = [for k, v in aws_subnet.private_subnet : v.id]
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
+    })
+  )
+}
+
+resource "aws_security_group" "rds" {
+  name        = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
+  description = var.rds_sg["tags"]["Description"]
+  vpc_id      = aws_vpc.this.id
+
+  dynamic "ingress" {
+    for_each = var.rds_sg["ingress"]
+
+    content {
+      from_port       = ingress.value["from_port"]
+      to_port         = ingress.value["to_port"]
+      protocol        = ingress.value["protocol"]
+      self            = ingress.value["self"]
+      security_groups = local.rds_sg[ingress.key]["security_groups"]
+      description     = ingress.value["description"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.rds_sg["egress"]
+
+    content {
+      from_port   = egress.value["from_port"]
+      to_port     = egress.value["to_port"]
+      protocol    = egress.value["protocol"]
+      self        = egress.value["self"]
+      cidr_blocks = egress.value["cidr_blocks"]
+      description = egress.value["description"]
+    }
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
+    })
+  )
 }

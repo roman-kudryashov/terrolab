@@ -49,6 +49,26 @@ variable "subnet_settings" {
   }
 }
 
+variable "private_subnet_settings" {
+  default = {
+    subnet-1 = {
+      az                      = "a"
+      cidr                    = "10.10.4.0/24"
+      map_public_ip_on_launch = false
+    }
+    subnet-2 = {
+      az                      = "b"
+      cidr                    = "10.10.5.0/24"
+      map_public_ip_on_launch = false
+    }
+    subnet-3 = {
+      az                      = "c"
+      cidr                    = "10.10.6.0/24"
+      map_public_ip_on_launch = false
+    }
+  }
+}
+
 variable "bastion_sg" {
   default = {
     name = "bastion"
@@ -293,31 +313,72 @@ variable "ghost_instance_settings" {
 variable "asg_settings" {
   default = {
     name                      = "ghost"
-  min_size                  = 1
-  desired_capacity          = 1
-  max_size                  = 1
-  load_balancer             = true
-  health_check_type         = "ELB"
-  health_check_grace_period = 300
-  default_cooldown          = 450
-  create_before_destroy     = true
-  version                   = "$Latest"
+    min_size                  = 1
+    desired_capacity          = 1
+    max_size                  = 1
+    load_balancer             = true
+    health_check_type         = "ELB"
+    health_check_grace_period = 300
+    default_cooldown          = 450
+    create_before_destroy     = true
+    version                   = "$Latest"
   }
 }
 
 variable "bastion_instance_settings" {
   default = {
-    name                    = "bastion"
-    disable_api_termination = false
+    name                        = "bastion"
+    disable_api_termination     = false
     associate_public_ip_address = true
-    instance_type           = "t2.micro"
-    source_dest_check = true
+    instance_type               = "t2.micro"
+    source_dest_check           = true
     ebs_block_device = {
       root = {
         volume_type           = "gp2"
         volume_size           = "8"
         delete_on_termination = true
       }
+    }
+  }
+}
+
+variable "rds_settings" {
+  default = {
+    name                    = "ghost"
+    dbname                  = "ghost_db"
+    allocated_storage       = "20"
+    storage_type            = "gp2"
+    engine                  = "mariadb"
+    availability_zone       = "us-east-1a"
+    engine_version          = "10.3.36"
+    instance_class          = "db.t3.micro"
+    username                = "ghost_user"
+    storage_encrypted       = true
+    skip_final_snapshot     = true
+    backup_retention_period = 35
+    backup_window           = "09:54-10:24"
+    family                  = "mariadb10.3"
+
+  }
+}
+
+variable "rds_sg" {
+  default = {
+    name = "rds"
+    ingress = {
+      mysql = {
+        from_port   = 3306
+        to_port     = 3306
+        protocol    = "tcp"
+        self        = false
+        cidr_blocks = []
+        description = "Inbound Mysql traffic"
+      }
+    }
+    egress = {
+    }
+    tags = {
+      "Description" = "allows access to RDS instances"
     }
   }
 }
