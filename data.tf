@@ -9,6 +9,17 @@ data "aws_iam_policy_document" "role" {
   }
 }
 
+data "aws_iam_policy_document" "fargate-role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
 data "aws_iam_policy_document" "policy" {
   statement {
     sid    = "1"
@@ -22,6 +33,23 @@ data "aws_iam_policy_document" "policy" {
       "secretsmanager:GetSecretValue",
       "kms:Decrypt"
 
+    ]
+    resources = ["*"]
+  }
+}
+
+data "aws_iam_policy_document" "fargate-policy" {
+  statement {
+    sid    = "1"
+    effect = "Allow"
+    actions = [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "elasticfilesystem:DescribeFileSystems",
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite"
     ]
     resources = ["*"]
   }
@@ -55,3 +83,13 @@ data "template_file" "user-data" {
     ssm_db_password = aws_ssm_parameter.secret.name
   }
 }
+
+data "aws_vpc_endpoint_service" "vpc_endpoint_service" {
+
+  for_each = try(var.vpc_endpoint_settings["endpoints"], {})
+
+  service      = lookup(each.value, "service", null)
+  service_type = lookup(each.value, "service_type", null)
+
+}
+

@@ -99,6 +99,16 @@ locals {
       security_groups = []
     }
   }
+  fargate = {
+    nfs = {
+      cidr_blocks     = [aws_vpc.this.cidr_block]
+      security_groups = []
+    }
+    ghost = {
+      cidr_blocks     = [aws_vpc.this.cidr_block]
+      security_groups = []
+    }
+  }
   alb_sg = {
     global = {
       security_groups = [aws_security_group.ec2-pool.id]
@@ -160,6 +170,47 @@ resource "aws_security_group" "bastion" {
   )
 }
 
+resource "aws_security_group" "endpoint" {
+  name        = join("-", tolist([var.default_tags["Project"], var.endpoint_sg["name"]]))
+  description = var.endpoint_sg["tags"]["Description"]
+  vpc_id      = aws_vpc.this.id
+  lifecycle {
+    create_before_destroy = false
+  }
+  dynamic "ingress" {
+    for_each = var.endpoint_sg["ingress"]
+
+    content {
+      from_port   = ingress.value["from_port"]
+      to_port     = ingress.value["to_port"]
+      protocol    = ingress.value["protocol"]
+      self        = ingress.value["self"]
+      cidr_blocks = ingress.value["cidr_blocks"]
+      description = ingress.value["description"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.endpoint_sg["egress"]
+
+    content {
+      from_port   = egress.value["from_port"]
+      to_port     = egress.value["to_port"]
+      protocol    = egress.value["protocol"]
+      self        = egress.value["self"]
+      cidr_blocks = egress.value["cidr_blocks"]
+      description = egress.value["description"]
+    }
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.endpoint_sg["name"]]))
+    })
+  )
+}
+
 resource "aws_security_group" "ec2-pool" {
   name        = join("-", tolist([var.default_tags["Project"], var.ec2_pool_sg["name"]]))
   description = var.ec2_pool_sg["tags"]["Description"]
@@ -199,6 +250,47 @@ resource "aws_security_group" "ec2-pool" {
     })
   )
 }
+
+resource "aws_security_group" "fargate" {
+  name        = join("-", tolist([var.default_tags["Project"], var.fargate_sg["name"]]))
+  description = var.fargate_sg["tags"]["Description"]
+  vpc_id      = aws_vpc.this.id
+
+  dynamic "ingress" {
+    for_each = var.fargate_sg["ingress"]
+
+    content {
+      from_port       = ingress.value["from_port"]
+      to_port         = ingress.value["to_port"]
+      protocol        = ingress.value["protocol"]
+      self            = ingress.value["self"]
+      cidr_blocks     = local.fargate[ingress.key]["cidr_blocks"]
+      security_groups = local.fargate[ingress.key]["security_groups"]
+      description     = ingress.value["description"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.ec2_pool_sg["egress"]
+
+    content {
+      from_port   = egress.value["from_port"]
+      to_port     = egress.value["to_port"]
+      protocol    = egress.value["protocol"]
+      self        = egress.value["self"]
+      cidr_blocks = egress.value["cidr_blocks"]
+      description = egress.value["description"]
+    }
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.fargate_sg["name"]]))
+    })
+  )
+}
+
 
 resource "aws_security_group" "alb" {
   name        = join("-", tolist([var.default_tags["Project"], var.alb_sg["name"]]))
@@ -297,9 +389,28 @@ resource "aws_iam_role" "role" {
   )
 }
 
+resource "aws_iam_role" "fargate-role" {
+  name               = join("-", [var.default_tags["Project"], var.fargate_iam_role["name"]])
+  assume_role_policy = data.aws_iam_policy_document.fargate-role.json
+  description        = var.fargate_iam_role["role_description"]
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name"        = join("-", [var.default_tags["Project"], var.fargate_iam_role["name"]]),
+      "Description" = var.fargate_iam_role["role_description"]
+    })
+  )
+}
+
 resource "aws_iam_instance_profile" "instance-profile" {
   name = join("-", [var.default_tags["Project"], var.iam_role["name"]])
   role = aws_iam_role.role.name
+}
+
+resource "aws_iam_instance_profile" "fargate-instance-profile" {
+  name = join("-", [var.default_tags["Project"], var.fargate_iam_role["name"]])
+  role = aws_iam_role.fargate-role.name
 }
 
 resource "aws_iam_policy" "policy" {
@@ -308,9 +419,20 @@ resource "aws_iam_policy" "policy" {
   policy      = data.aws_iam_policy_document.policy.json
 }
 
+resource "aws_iam_policy" "fargate-policy" {
+  name        = join("-", [var.default_tags["Project"], var.fargate_iam_role["name"]])
+  description = var.fargate_iam_role["policy_description"]
+  policy      = data.aws_iam_policy_document.fargate-policy.json
+}
+
 resource "aws_iam_role_policy_attachment" "role-policy-attachment" {
   role       = aws_iam_role.role.name
   policy_arn = aws_iam_policy.policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "fargate-role-policy-attachment" {
+  role       = aws_iam_role.fargate-role.name
+  policy_arn = aws_iam_policy.fargate-policy.arn
 }
 
 resource "aws_efs_file_system" "efs" {
@@ -397,13 +519,6 @@ resource "aws_lb_listener" "forward" {
     target_group_arn = aws_lb_target_group.target-group.arn
   }
 }
-
-#resource "aws_lb_target_group_attachment" "target-group-attachment" {
-#  count            = length(var.target_instance_id_list)
-#  target_group_arn = aws_lb_target_group.target-group.arn
-#  target_id        = var.target_instance_id_list[count.index]
-#  port             = var.tg_settings["port"]
-#}
 
 resource "aws_launch_template" "lt" {
   name                    = join("-", tolist([var.default_tags["Project"], var.ghost_instance_settings["name"]]))
@@ -645,4 +760,40 @@ resource "aws_db_parameter_group" "rds-pg" {
       "Name" = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
     })
   )
+}
+
+resource "aws_ecr_repository" "ecr" {
+  name                 = join("-", tolist([var.default_tags["Project"], var.ecr_settings["name"]]))
+  image_tag_mutability = var.ecr_settings["image_tag_mutability"]
+
+  image_scanning_configuration {
+    scan_on_push = var.ecr_settings["scan_on_push"]
+  }
+
+  tags = merge(
+    var.default_tags,
+    {
+      "Name"        = join("-", tolist([var.default_tags["Project"], var.ecr_settings["name"]])),
+      "Description" = "Ghost Container registry."
+    }
+  )
+}
+
+resource "aws_vpc_endpoint" "vpc_endpoint" {
+
+  for_each = try(var.vpc_endpoint_settings["endpoints"], {})
+
+  vpc_id            = aws_vpc.this.id
+  service_name      = data.aws_vpc_endpoint_service.vpc_endpoint_service[each.key].service_name
+  vpc_endpoint_type = lookup(each.value, "service_type", "Interface")
+
+  security_group_ids  = [aws_security_group.endpoint.id]
+  subnet_ids          = [for k, v in aws_subnet.private_subnet : v.id]
+  tags = merge(
+    var.default_tags,
+    {
+      Name = join("-", [var.default_tags["Project"], each.value["service"], lower(each.value["service_type"]), "endpoint"])
+    }
+  )
+
 }

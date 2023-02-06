@@ -101,6 +101,38 @@ variable "bastion_sg" {
   }
 }
 
+variable "endpoint_sg" {
+  default = {
+    name = "endpoint"
+    ingress = {
+      ssh = {
+        from_port   = 443
+        to_port     = 443
+        protocol    = "tcp"
+        self        = false
+        cidr_blocks = ["0.0.0.0/0"]
+        description = "Inbound ssh traffic"
+      }
+    }
+    egress = {
+      global = {
+        from_port        = 0
+        to_port          = 0
+        protocol         = "-1"
+        self             = false
+        security_groups  = []
+        prefix_list_ids  = []
+        cidr_blocks      = ["0.0.0.0/0"]
+        ipv6_cidr_blocks = []
+        description      = "Outbound traffic"
+      }
+    }
+    tags = {
+      "Description" = "allows access to endpoint"
+    }
+  }
+}
+
 variable "alb_sg" {
   default = {
     name = "alb"
@@ -210,6 +242,46 @@ variable "efs_sg" {
   }
 }
 
+variable "fargate_sg" {
+  default = {
+    name = "fargate"
+    ingress = {
+      nfs = {
+        from_port   = 2049
+        to_port     = 2049
+        protocol    = "tcp"
+        self        = false
+        cidr_blocks = []
+        description = "Inbound nfs traffic"
+      }
+      ghost = {
+        from_port   = 2368
+        to_port     = 2368
+        protocol    = "tcp"
+        self        = false
+        cidr_blocks = []
+        description = "Inbound ghost traffic"
+      }
+    }
+    egress = {
+      global = {
+        from_port        = 0
+        to_port          = 0
+        protocol         = "-1"
+        self             = false
+        security_groups  = []
+        prefix_list_ids  = []
+        cidr_blocks      = []
+        ipv6_cidr_blocks = []
+        description      = "Outbound traffic"
+      }
+    }
+    tags = {
+      "Description" = "defines access to Fargate container"
+    }
+  }
+}
+
 variable "key_pair" {
   default = {
     name       = "ghost-ec2-pool"
@@ -224,6 +296,15 @@ variable "iam_role" {
     policy_description = "EC2 main policy"
   }
 }
+
+variable "fargate_iam_role" {
+  default = {
+    name               = "fargate_ghost_app"
+    role_description   = "ECS main role"
+    policy_description = "ECS main policy"
+  }
+}
+
 
 variable "efs_settings" {
   default = {
@@ -379,6 +460,50 @@ variable "rds_sg" {
     }
     tags = {
       "Description" = "allows access to RDS instances"
+    }
+  }
+}
+
+variable "ecr_settings"  {
+  default = {
+    name = "ghost"
+        image_tag_mutability = "MUTABLE"
+    scan_on_push         = false
+  }
+}
+
+
+variable "vpc_endpoint_settings" {
+  default = {
+    endpoints = {
+      s3 = {
+        service = "s3"
+        service_type = "Interface"
+      }
+      ecr_dkr = {
+        service = "ecr.dkr"
+        service_type = "Interface"
+      }
+      ecr_api = {
+        service = "ecr.api"
+        service_type = "Interface"
+      }
+      efs = {
+        service = "elasticfilesystem"
+        service_type = "Interface"
+      }
+      ssm = {
+        service = "ssm"
+        service_type = "Interface"
+      }
+      cloudwatch = {
+        service = "monitoring"
+        service_type = "Interface"
+      }
+      cloudwatch_logs = {
+        service = "logs"
+        service_type = "Interface"
+      }
     }
   }
 }
