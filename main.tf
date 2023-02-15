@@ -869,6 +869,10 @@ resource "aws_lb_target_group" "ecs-target-group" {
 
 resource "aws_ecs_cluster" "ecs" {
   name = join("-", tolist([var.default_tags["Project"], var.ecs_settings["name"]]))
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
 }
 
 resource "aws_ecs_cluster_capacity_providers" "ecs" {
@@ -970,4 +974,210 @@ resource "aws_ecs_service" "ecs" {
     subnets          = [for k, v in aws_subnet.private_subnet : v.id]
     security_groups  = [aws_security_group.fargate.id]
   }
+}
+
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = "terralab"
+
+  dashboard_body = <<EOF
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/EC2",
+            "CPUUtilization",
+            "AutoScalingGroupName",
+            "${aws_autoscaling_group.asg.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "Autoscaling group CPU Utilization"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/ECS",
+            "CPUUtilization",
+            "ServiceName",
+            "${aws_ecs_service.ecs.name}",
+            "ClusterName",
+            "${aws_ecs_cluster.ecs.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "ECS service CPU Utilization"
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/EFS",
+            "StorageBytes",
+            "StorageClass",
+            "Total",
+            "FileSystemId",
+            "${aws_efs_file_system.efs.id}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "EFS Total Storage."
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/EFS",
+            "ClientConnections",
+            "FileSystemId",
+            "${aws_efs_file_system.efs.id}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "EFS Client connections."
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/RDS",
+            "CPUUtilization",
+            "DBInstanceIdentifier",
+            "${aws_db_instance.rds.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "RDS CPU Utilization"
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/RDS",
+            "DatabaseConnections",
+            "DBInstanceIdentifier",
+            "${aws_db_instance.rds.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "RDS client connections."
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/RDS",
+            "WriteIOPS",
+            "DBInstanceIdentifier",
+            "${aws_db_instance.rds.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "RDS Write IOPS."
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/RDS",
+            "ReadIOPS",
+            "DBInstanceIdentifier",
+            "${aws_db_instance.rds.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "RDS Read IOPS."
+      }
+    },
+{
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "ECS/ContainerInsights",
+            "RunningTaskCount",
+            "ServiceName",
+            "${aws_ecs_service.ecs.name}",
+            "ClusterName",
+            "${aws_ecs_cluster.ecs.name}"
+          ]
+        ],
+        "period": 300,
+        "stat": "Average",
+        "region": "${var.region}",
+        "title": "ECS Running task acount."
+      }
+    }
+  ]
+}
+EOF
 }
