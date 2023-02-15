@@ -49,7 +49,10 @@ data "aws_iam_policy_document" "fargate-policy" {
       "ecr:BatchGetImage",
       "elasticfilesystem:DescribeFileSystems",
       "elasticfilesystem:ClientMount",
-      "elasticfilesystem:ClientWrite"
+      "elasticfilesystem:ClientWrite",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:CreateLogGroup"
     ]
     resources = ["*"]
   }
@@ -92,4 +95,3 @@ data "aws_vpc_endpoint_service" "vpc_endpoint_service" {
   service_type = lookup(each.value, "service_type", null)
 
 }
-

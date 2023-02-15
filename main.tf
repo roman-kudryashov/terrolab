@@ -71,6 +71,18 @@ resource "aws_route_table" "default-public" {
   )
 }
 
+resource "aws_route_table" "default-private" {
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name"        = join("-", tolist([var.default_tags["Project"], "default-private"])),
+      "Description" = "Default private route table"
+    })
+  )
+}
+
 resource "aws_route" "igw" {
   route_table_id         = aws_route_table.default-public.id
   destination_cidr_block = "0.0.0.0/0"
@@ -82,6 +94,12 @@ resource "aws_route_table_association" "default-public-association" {
   for_each       = var.subnet_settings
   subnet_id      = aws_subnet.public_subnet[each.key].id
   route_table_id = aws_route_table.default-public.id
+}
+
+resource "aws_route_table_association" "default-private-association" {
+  for_each       = var.private_subnet_settings
+  subnet_id      = aws_subnet.private_subnet[each.key].id
+  route_table_id = aws_route_table.default-private.id
 }
 
 locals {
@@ -111,12 +129,18 @@ locals {
   }
   alb_sg = {
     global = {
-      security_groups = [aws_security_group.ec2-pool.id]
+      security_groups = [
+        aws_security_group.ec2-pool.id,
+        aws_security_group.fargate.id
+      ]
     }
   }
   efs_sg = {
     nfs = {
-      security_groups = [aws_security_group.ec2-pool.id]
+      security_groups = [
+        aws_security_group.ec2-pool.id,
+        aws_security_group.fargate.id
+      ]
     }
     global = {
       cidr_blocks = [aws_vpc.this.cidr_block]
@@ -124,7 +148,15 @@ locals {
   }
   rds_sg = {
     mysql = {
-      security_groups = [aws_security_group.ec2-pool.id]
+      security_groups = [
+        aws_security_group.ec2-pool.id,
+        aws_security_group.fargate.id
+      ]
+    }
+  }
+  endpoint_sg = {
+    global = {
+      cidr_blocks = [aws_vpc.this.cidr_block]
     }
   }
 }
@@ -185,7 +217,7 @@ resource "aws_security_group" "endpoint" {
       to_port     = ingress.value["to_port"]
       protocol    = ingress.value["protocol"]
       self        = ingress.value["self"]
-      cidr_blocks = ingress.value["cidr_blocks"]
+      cidr_blocks = local.endpoint_sg[ingress.key]["cidr_blocks"]
       description = ingress.value["description"]
     }
   }
@@ -515,8 +547,17 @@ resource "aws_lb_listener" "forward" {
   protocol          = var.listeners_settings["protocol"]
 
   default_action {
-    type             = var.listeners_settings["type"]
-    target_group_arn = aws_lb_target_group.target-group.arn
+    type = var.listeners_settings["type"]
+    forward {
+      target_group {
+        arn    = aws_lb_target_group.target-group.arn
+        weight = 50
+      }
+      target_group {
+        arn    = aws_lb_target_group.ecs-target-group.arn
+        weight = 50
+      }
+    }
   }
 }
 
@@ -783,17 +824,150 @@ resource "aws_vpc_endpoint" "vpc_endpoint" {
 
   for_each = try(var.vpc_endpoint_settings["endpoints"], {})
 
-  vpc_id            = aws_vpc.this.id
-  service_name      = data.aws_vpc_endpoint_service.vpc_endpoint_service[each.key].service_name
-  vpc_endpoint_type = lookup(each.value, "service_type", "Interface")
+  vpc_id              = aws_vpc.this.id
+  service_name        = data.aws_vpc_endpoint_service.vpc_endpoint_service[each.key].service_name
+  vpc_endpoint_type   = lookup(each.value, "service_type", "Interface")
+  security_group_ids  = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([aws_security_group.endpoint.id], lookup(each.value, "security_group_ids", []))) : null
+  subnet_ids          = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([for k, v in aws_subnet.private_subnet : v.id], lookup(each.value, "subnet_ids", []))) : null
+  route_table_ids     = lookup(each.value, "service_type", "Interface") == "Gateway" ? distinct(concat([aws_route_table.default-private.id], lookup(each.value, "route_table_ids", []))) : null
+  private_dns_enabled = lookup(each.value, "service_type", "Interface") == "Interface" ? lookup(each.value, "private_dns_enabled", null) : null
 
-  security_group_ids  = [aws_security_group.endpoint.id]
-  subnet_ids          = [for k, v in aws_subnet.private_subnet : v.id]
   tags = merge(
     var.default_tags,
     {
       Name = join("-", [var.default_tags["Project"], each.value["service"], lower(each.value["service_type"]), "endpoint"])
     }
   )
+}
 
+resource "aws_lb_target_group" "ecs-target-group" {
+  name                 = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
+  port                 = var.ecs_tg_settings["port"]
+  protocol             = var.ecs_tg_settings["protocol"]
+  vpc_id               = aws_vpc.this.id
+  target_type          = var.ecs_tg_settings["target_type"]
+  deregistration_delay = var.ecs_tg_settings["deregistration_delay"]
+  slow_start           = var.ecs_tg_settings["slow_start"]
+
+  health_check {
+    port                = var.ecs_tg_settings["port"]
+    protocol            = var.ecs_tg_settings["protocol"]
+    healthy_threshold   = var.ecs_tg_settings["health_check_healthy_threshold"]
+    interval            = var.ecs_tg_settings["health_check_interval"]
+    unhealthy_threshold = var.ecs_tg_settings["health_check_unhealthy_threshold"]
+    path                = var.ecs_tg_settings["health_check_path"]
+    matcher             = var.ecs_tg_settings["health_check_matcher"]
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
+    })
+  )
+}
+
+resource "aws_ecs_cluster" "ecs" {
+  name = join("-", tolist([var.default_tags["Project"], var.ecs_settings["name"]]))
+}
+
+resource "aws_ecs_cluster_capacity_providers" "ecs" {
+  cluster_name = aws_ecs_cluster.ecs.name
+
+  capacity_providers = var.ecs_settings["capacity_providers"]
+
+  default_capacity_provider_strategy {
+    base              = 1
+    weight            = 100
+    capacity_provider = "FARGATE"
+  }
+}
+
+resource "aws_ecs_task_definition" "ecs" {
+  family                   = join("-", tolist([var.default_tags["Project"], var.ecs_settings["name"]]))
+  requires_compatibilities = var.ecs_settings["capacity_providers"]
+  network_mode             = var.ecs_settings["network_mode"]
+  cpu                      = var.ecs_settings["cpu"]
+  memory                   = var.ecs_settings["memory"]
+  task_role_arn            = aws_iam_role.fargate-role.arn
+  execution_role_arn       = aws_iam_role.fargate-role.arn
+  volume {
+    name = var.ecs_settings["volume_name"]
+    efs_volume_configuration {
+      file_system_id = aws_efs_file_system.efs.id
+    }
+  }
+
+  container_definitions = <<TASK_DEFINITION
+[
+  {
+    "name": "ghost_container",
+    "image": "${aws_ecr_repository.ecr.repository_url}:latest",
+    "essential": true,
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+          "awslogs-create-group": "true",
+          "awslogs-group": "ghost",
+          "awslogs-region": "${var.region}",
+          "awslogs-stream-prefix": "ecs"
+      }
+    },
+    "environment": [
+      {
+        "name": "database__client",
+        "value": "mysql"
+      },
+      {
+        "name": "database__connection__host",
+        "value": "${aws_db_instance.rds.address}"
+      },
+      {
+        "name": "database__connection__user",
+        "value": "${var.rds_settings["username"]}"
+      },
+      {
+        "name": "database__connection__password",
+        "value": "${random_string.password.result}"
+      },
+      {
+        "name": "database__connection__database",
+        "value": "${var.rds_settings["dbname"]}"
+      }
+    ],
+    "mountPoints": [
+      {
+        "containerPath": "/var/lib/ghost/content",
+        "sourceVolume": "ghost_volume"
+      }
+    ],
+    "portMappings": [
+      {
+        "containerPort": 2368,
+        "hostPort": 2368
+      }
+    ]
+  }
+]
+
+TASK_DEFINITION
+
+}
+
+resource "aws_ecs_service" "ecs" {
+  name            = var.ecs_settings["name"]
+  cluster         = aws_ecs_cluster.ecs.id
+  task_definition = aws_ecs_task_definition.ecs.arn
+  launch_type     = "FARGATE"
+  desired_count   = 1
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ecs-target-group.arn
+    container_name   = "ghost_container"
+    container_port   = "2368"
+  }
+  network_configuration {
+    assign_public_ip = false
+    subnets          = [for k, v in aws_subnet.private_subnet : v.id]
+    security_groups  = [aws_security_group.fargate.id]
+  }
 }

@@ -105,13 +105,16 @@ variable "endpoint_sg" {
   default = {
     name = "endpoint"
     ingress = {
-      ssh = {
-        from_port   = 443
-        to_port     = 443
-        protocol    = "tcp"
-        self        = false
-        cidr_blocks = ["0.0.0.0/0"]
-        description = "Inbound ssh traffic"
+      global = {
+        from_port        = 0
+        to_port          = 0
+        protocol         = "-1"
+        self             = false
+        security_groups  = []
+        prefix_list_ids  = []
+        cidr_blocks      = []
+        ipv6_cidr_blocks = []
+        description      = "Inbound ssh traffic"
       }
     }
     egress = {
@@ -464,10 +467,10 @@ variable "rds_sg" {
   }
 }
 
-variable "ecr_settings"  {
+variable "ecr_settings" {
   default = {
-    name = "ghost"
-        image_tag_mutability = "MUTABLE"
+    name                 = "ghost"
+    image_tag_mutability = "MUTABLE"
     scan_on_push         = false
   }
 }
@@ -477,33 +480,70 @@ variable "vpc_endpoint_settings" {
   default = {
     endpoints = {
       s3 = {
-        service = "s3"
-        service_type = "Interface"
+        service             = "s3"
+        service_type        = "Gateway"
+        private_dns_enabled = false
       }
       ecr_dkr = {
-        service = "ecr.dkr"
-        service_type = "Interface"
+        service             = "ecr.dkr"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
       ecr_api = {
-        service = "ecr.api"
-        service_type = "Interface"
+        service             = "ecr.api"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
       efs = {
-        service = "elasticfilesystem"
-        service_type = "Interface"
+        service             = "elasticfilesystem"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
       ssm = {
-        service = "ssm"
-        service_type = "Interface"
+        service             = "ssm"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
       cloudwatch = {
-        service = "monitoring"
-        service_type = "Interface"
+        service             = "monitoring"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
       cloudwatch_logs = {
-        service = "logs"
-        service_type = "Interface"
+        service             = "logs"
+        service_type        = "Interface"
+        private_dns_enabled = true
       }
     }
+  }
+}
+
+variable "ecs_tg_settings" {
+  default = {
+    name                             = "ecs-ghost-tg"
+    target_type                      = "ip"
+    port                             = 2368
+    protocol                         = "HTTP"
+    deregistration_delay             = 300
+    slow_start                       = 0
+    proxy_protocol_v2                = false
+    health_check_port                = 2368
+    health_check_protocol            = "HTTP"
+    health_check_healthy_threshold   = 10
+    health_check_unhealthy_threshold = 10
+    health_check_interval            = 60
+    health_check_path                = "/ghost/"
+    health_check_matcher             = "200"
+  }
+}
+
+variable "ecs_settings" {
+  default = {
+    name               = "ghost"
+    capacity_providers = ["FARGATE"]
+    network_mode       = "awsvpc"
+    cpu                = 1024
+    memory             = 2048
+    volume_name        = "ghost_volume"
   }
 }
