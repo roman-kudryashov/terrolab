@@ -1,3 +1,6 @@
+/*=================================
+NETWORK
+==================================*/
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   instance_tenancy     = var.vpc_instance_tenancy
@@ -102,6 +105,29 @@ resource "aws_route_table_association" "default-private-association" {
   route_table_id = aws_route_table.default-private.id
 }
 
+resource "aws_vpc_endpoint" "vpc_endpoint" {
+
+  for_each = try(var.vpc_endpoint_settings["endpoints"], {})
+
+  vpc_id              = aws_vpc.this.id
+  service_name        = data.aws_vpc_endpoint_service.vpc_endpoint_service[each.key].service_name
+  vpc_endpoint_type   = lookup(each.value, "service_type", "Interface")
+  security_group_ids  = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([aws_security_group.endpoint.id], lookup(each.value, "security_group_ids", []))) : null
+  subnet_ids          = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([for k, v in aws_subnet.private_subnet : v.id], lookup(each.value, "subnet_ids", []))) : null
+  route_table_ids     = lookup(each.value, "service_type", "Interface") == "Gateway" ? distinct(concat([aws_route_table.default-private.id], lookup(each.value, "route_table_ids", []))) : null
+  private_dns_enabled = lookup(each.value, "service_type", "Interface") == "Interface" ? lookup(each.value, "private_dns_enabled", null) : null
+
+  tags = merge(
+    var.default_tags,
+    {
+      Name = join("-", [var.default_tags["Project"], each.value["service"], lower(each.value["service_type"]), "endpoint"])
+    }
+  )
+}
+
+/*=================================
+SECURITY GROUP
+==================================*/
 locals {
   ec2_pool_sg = {
     ssh = {
@@ -402,11 +428,47 @@ resource "aws_security_group" "efs" {
   )
 }
 
-resource "aws_key_pair" "ssh" {
-  key_name   = var.key_pair["name"]
-  public_key = var.key_pair["public_key"]
-}
+resource "aws_security_group" "rds" {
+  name        = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
+  description = var.rds_sg["tags"]["Description"]
+  vpc_id      = aws_vpc.this.id
 
+  dynamic "ingress" {
+    for_each = var.rds_sg["ingress"]
+
+    content {
+      from_port       = ingress.value["from_port"]
+      to_port         = ingress.value["to_port"]
+      protocol        = ingress.value["protocol"]
+      self            = ingress.value["self"]
+      security_groups = local.rds_sg[ingress.key]["security_groups"]
+      description     = ingress.value["description"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.rds_sg["egress"]
+
+    content {
+      from_port   = egress.value["from_port"]
+      to_port     = egress.value["to_port"]
+      protocol    = egress.value["protocol"]
+      self        = egress.value["self"]
+      cidr_blocks = egress.value["cidr_blocks"]
+      description = egress.value["description"]
+    }
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
+    })
+  )
+}
+/*=================================
+IAM
+==================================*/
 resource "aws_iam_role" "role" {
   name               = join("-", [var.default_tags["Project"], var.iam_role["name"]])
   assume_role_policy = data.aws_iam_policy_document.role.json
@@ -467,6 +529,9 @@ resource "aws_iam_role_policy_attachment" "fargate-role-policy-attachment" {
   policy_arn = aws_iam_policy.fargate-policy.arn
 }
 
+/*=================================
+EFS
+==================================*/
 resource "aws_efs_file_system" "efs" {
   creation_token = var.efs_settings["name_prefix"]
 
@@ -495,6 +560,9 @@ resource "aws_efs_mount_target" "mount_target" {
   security_groups = [aws_security_group.efs.id]
 }
 
+/*=================================
+LB
+==================================*/
 resource "aws_lb" "loadbalancer" {
   name                             = join("-", tolist(["lb", var.default_tags["Project"], var.lb_settings["name"]]))
   internal                         = var.lb_settings["internal"]
@@ -559,6 +627,41 @@ resource "aws_lb_listener" "forward" {
       }
     }
   }
+}
+
+resource "aws_lb_target_group" "ecs-target-group" {
+  name                 = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
+  port                 = var.ecs_tg_settings["port"]
+  protocol             = var.ecs_tg_settings["protocol"]
+  vpc_id               = aws_vpc.this.id
+  target_type          = var.ecs_tg_settings["target_type"]
+  deregistration_delay = var.ecs_tg_settings["deregistration_delay"]
+  slow_start           = var.ecs_tg_settings["slow_start"]
+
+  health_check {
+    port                = var.ecs_tg_settings["port"]
+    protocol            = var.ecs_tg_settings["protocol"]
+    healthy_threshold   = var.ecs_tg_settings["health_check_healthy_threshold"]
+    interval            = var.ecs_tg_settings["health_check_interval"]
+    unhealthy_threshold = var.ecs_tg_settings["health_check_unhealthy_threshold"]
+    path                = var.ecs_tg_settings["health_check_path"]
+    matcher             = var.ecs_tg_settings["health_check_matcher"]
+  }
+
+  tags = merge(
+    var.default_tags,
+    tomap({
+      "Name" = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
+    })
+  )
+}
+
+/*=================================
+EC2
+==================================*/
+resource "aws_key_pair" "ssh" {
+  key_name   = var.key_pair["name"]
+  public_key = var.key_pair["public_key"]
 }
 
 resource "aws_launch_template" "lt" {
@@ -660,6 +763,9 @@ resource "aws_instance" "bastion" {
 
 }
 
+/*=================================
+RDS
+==================================*/
 resource "aws_kms_key" "rds-kms-key" {
   description             = "For RDS"
   deletion_window_in_days = 10
@@ -710,44 +816,6 @@ resource "aws_db_subnet_group" "rds-subnet-group" {
   )
 }
 
-resource "aws_security_group" "rds" {
-  name        = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
-  description = var.rds_sg["tags"]["Description"]
-  vpc_id      = aws_vpc.this.id
-
-  dynamic "ingress" {
-    for_each = var.rds_sg["ingress"]
-
-    content {
-      from_port       = ingress.value["from_port"]
-      to_port         = ingress.value["to_port"]
-      protocol        = ingress.value["protocol"]
-      self            = ingress.value["self"]
-      security_groups = local.rds_sg[ingress.key]["security_groups"]
-      description     = ingress.value["description"]
-    }
-  }
-
-  dynamic "egress" {
-    for_each = var.rds_sg["egress"]
-
-    content {
-      from_port   = egress.value["from_port"]
-      to_port     = egress.value["to_port"]
-      protocol    = egress.value["protocol"]
-      self        = egress.value["self"]
-      cidr_blocks = egress.value["cidr_blocks"]
-      description = egress.value["description"]
-    }
-  }
-
-  tags = merge(
-    var.default_tags,
-    tomap({
-      "Name" = join("-", tolist([var.default_tags["Project"], var.rds_sg["name"]]))
-    })
-  )
-}
 resource "aws_db_instance" "rds" {
   identifier              = join("-", tolist([var.default_tags["Project"], var.rds_settings["name"]]))
   name                    = var.rds_settings["dbname"]
@@ -803,6 +871,9 @@ resource "aws_db_parameter_group" "rds-pg" {
   )
 }
 
+/*=================================
+ECR
+==================================*/
 resource "aws_ecr_repository" "ecr" {
   name                 = join("-", tolist([var.default_tags["Project"], var.ecr_settings["name"]]))
   image_tag_mutability = var.ecr_settings["image_tag_mutability"]
@@ -820,53 +891,6 @@ resource "aws_ecr_repository" "ecr" {
   )
 }
 
-resource "aws_vpc_endpoint" "vpc_endpoint" {
-
-  for_each = try(var.vpc_endpoint_settings["endpoints"], {})
-
-  vpc_id              = aws_vpc.this.id
-  service_name        = data.aws_vpc_endpoint_service.vpc_endpoint_service[each.key].service_name
-  vpc_endpoint_type   = lookup(each.value, "service_type", "Interface")
-  security_group_ids  = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([aws_security_group.endpoint.id], lookup(each.value, "security_group_ids", []))) : null
-  subnet_ids          = lookup(each.value, "service_type", "Interface") == "Interface" ? distinct(concat([for k, v in aws_subnet.private_subnet : v.id], lookup(each.value, "subnet_ids", []))) : null
-  route_table_ids     = lookup(each.value, "service_type", "Interface") == "Gateway" ? distinct(concat([aws_route_table.default-private.id], lookup(each.value, "route_table_ids", []))) : null
-  private_dns_enabled = lookup(each.value, "service_type", "Interface") == "Interface" ? lookup(each.value, "private_dns_enabled", null) : null
-
-  tags = merge(
-    var.default_tags,
-    {
-      Name = join("-", [var.default_tags["Project"], each.value["service"], lower(each.value["service_type"]), "endpoint"])
-    }
-  )
-}
-
-resource "aws_lb_target_group" "ecs-target-group" {
-  name                 = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
-  port                 = var.ecs_tg_settings["port"]
-  protocol             = var.ecs_tg_settings["protocol"]
-  vpc_id               = aws_vpc.this.id
-  target_type          = var.ecs_tg_settings["target_type"]
-  deregistration_delay = var.ecs_tg_settings["deregistration_delay"]
-  slow_start           = var.ecs_tg_settings["slow_start"]
-
-  health_check {
-    port                = var.ecs_tg_settings["port"]
-    protocol            = var.ecs_tg_settings["protocol"]
-    healthy_threshold   = var.ecs_tg_settings["health_check_healthy_threshold"]
-    interval            = var.ecs_tg_settings["health_check_interval"]
-    unhealthy_threshold = var.ecs_tg_settings["health_check_unhealthy_threshold"]
-    path                = var.ecs_tg_settings["health_check_path"]
-    matcher             = var.ecs_tg_settings["health_check_matcher"]
-  }
-
-  tags = merge(
-    var.default_tags,
-    tomap({
-      "Name" = join("-", tolist([var.default_tags["Project"], var.ecs_tg_settings["name"], var.ecs_tg_settings["port"]]))
-    })
-  )
-}
-
 resource "aws_ecs_cluster" "ecs" {
   name = join("-", tolist([var.default_tags["Project"], var.ecs_settings["name"]]))
   setting {
@@ -875,6 +899,9 @@ resource "aws_ecs_cluster" "ecs" {
   }
 }
 
+/*=================================
+ECS
+==================================*/
 resource "aws_ecs_cluster_capacity_providers" "ecs" {
   cluster_name = aws_ecs_cluster.ecs.name
 

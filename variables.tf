@@ -1,3 +1,6 @@
+/*=================================
+GENERIC
+==================================*/
 variable "region" {
   default = "us-east-1"
 }
@@ -9,6 +12,9 @@ variable "default_tags" {
   }
 }
 
+/*=================================
+NETWORK
+==================================*/
 variable "vpc_cidr" {
   default = "10.10.0.0/16"
 }
@@ -69,6 +75,51 @@ variable "private_subnet_settings" {
   }
 }
 
+variable "vpc_endpoint_settings" {
+  default = {
+    endpoints = {
+      s3 = {
+        service             = "s3"
+        service_type        = "Gateway"
+        private_dns_enabled = false
+      }
+      ecr_dkr = {
+        service             = "ecr.dkr"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+      ecr_api = {
+        service             = "ecr.api"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+      efs = {
+        service             = "elasticfilesystem"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+      ssm = {
+        service             = "ssm"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+      cloudwatch = {
+        service             = "monitoring"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+      cloudwatch_logs = {
+        service             = "logs"
+        service_type        = "Interface"
+        private_dns_enabled = true
+      }
+    }
+  }
+}
+
+/*=================================
+SECURITY GROUP
+==================================*/
 variable "bastion_sg" {
   default = {
     name = "bastion"
@@ -285,13 +336,30 @@ variable "fargate_sg" {
   }
 }
 
-variable "key_pair" {
+variable "rds_sg" {
   default = {
-    name       = "ghost-ec2-pool"
-    public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDCVtiwVs+Q4/XpjcHggbruL5pqYlTUo4kv+kdpFFngysFmeaM+BBH6ii1ZZPQP8TCMGxrI8CEAtP+sBrOfotxoiwb1oC7Pik6r6Q89MhX9elTF4Tp6rx2CocdPiInkV01rHxcfLOghmEcmYi4BFHgKJLZH0AU5PJvTLfuQENcdfPUbFpm2WliJvSgDjsnFHh8O889p0eG20OsdsosgLTJWDRX4/ER2wh++s4MvmYI94q8fdSiBhYBibcvJc4BvHNiSps4JpMIaL9uUjorXZnYVgrxuNNXHI7e6w1bMBguqWsGXVeKILha+mRi4wcMorMI0VzaJRmwdwzH9LkVhTTWD6SrwBSfWusX6mQ6VmHndTczDaHaV1ciJ72gF5w0XSf0eB2EdEMZ7+WDe7BkulGGeu5GVODnsAFagRL3skLemoSwpIH/BtcojlJT5Tz8OYA55tJjdq4t3LlFeEVsCgAjWCNJ0AvWBPc4o/NI+s/OKdt6BCzwJFOJpHgtIfrUosNvqhYCmdJWpfCsTqGr4GosT5nlQanSEUOtbWcfKmz+r72IpzyvfrNyyurFq3Mw1m6Jc4R5ZWFeZ1UiGgzAtFAeek895mwQ9oMJEoJ/vhRhT7hrp5wSpgvS59+/+m25zSX3lQh/uHHDx02EylO6PjqFaW9d38xASIPHmVaFA8vWNqw== boris_kamenetskii@epam.com"
+    name = "rds"
+    ingress = {
+      mysql = {
+        from_port   = 3306
+        to_port     = 3306
+        protocol    = "tcp"
+        self        = false
+        cidr_blocks = []
+        description = "Inbound Mysql traffic"
+      }
+    }
+    egress = {
+    }
+    tags = {
+      "Description" = "allows access to RDS instances"
+    }
   }
 }
 
+/*=================================
+IAM
+==================================*/
 variable "iam_role" {
   default = {
     name               = "ghost_app"
@@ -308,7 +376,9 @@ variable "fargate_iam_role" {
   }
 }
 
-
+/*=================================
+EFS
+==================================*/
 variable "efs_settings" {
   default = {
     name_prefix      = "ghost_content"
@@ -324,6 +394,9 @@ variable "efs_settings" {
   }
 }
 
+/*=================================
+LB
+==================================*/
 variable "lb_settings" {
   default = {
     name                             = "ghost-alb"
@@ -366,6 +439,35 @@ variable "tg_settings" {
     health_check_interval            = 30
     health_check_path                = "/ghost/"
     health_check_matcher             = "200"
+  }
+}
+
+variable "ecs_tg_settings" {
+  default = {
+    name                             = "ecs-ghost-tg"
+    target_type                      = "ip"
+    port                             = 2368
+    protocol                         = "HTTP"
+    deregistration_delay             = 300
+    slow_start                       = 0
+    proxy_protocol_v2                = false
+    health_check_port                = 2368
+    health_check_protocol            = "HTTP"
+    health_check_healthy_threshold   = 10
+    health_check_unhealthy_threshold = 10
+    health_check_interval            = 60
+    health_check_path                = "/ghost/"
+    health_check_matcher             = "200"
+  }
+}
+
+/*=================================
+EC2
+==================================*/
+variable "key_pair" {
+  default = {
+    name       = "ghost-ec2-pool"
+    public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDCVtiwVs+Q4/XpjcHggbruL5pqYlTUo4kv+kdpFFngysFmeaM+BBH6ii1ZZPQP8TCMGxrI8CEAtP+sBrOfotxoiwb1oC7Pik6r6Q89MhX9elTF4Tp6rx2CocdPiInkV01rHxcfLOghmEcmYi4BFHgKJLZH0AU5PJvTLfuQENcdfPUbFpm2WliJvSgDjsnFHh8O889p0eG20OsdsosgLTJWDRX4/ER2wh++s4MvmYI94q8fdSiBhYBibcvJc4BvHNiSps4JpMIaL9uUjorXZnYVgrxuNNXHI7e6w1bMBguqWsGXVeKILha+mRi4wcMorMI0VzaJRmwdwzH9LkVhTTWD6SrwBSfWusX6mQ6VmHndTczDaHaV1ciJ72gF5w0XSf0eB2EdEMZ7+WDe7BkulGGeu5GVODnsAFagRL3skLemoSwpIH/BtcojlJT5Tz8OYA55tJjdq4t3LlFeEVsCgAjWCNJ0AvWBPc4o/NI+s/OKdt6BCzwJFOJpHgtIfrUosNvqhYCmdJWpfCsTqGr4GosT5nlQanSEUOtbWcfKmz+r72IpzyvfrNyyurFq3Mw1m6Jc4R5ZWFeZ1UiGgzAtFAeek895mwQ9oMJEoJ/vhRhT7hrp5wSpgvS59+/+m25zSX3lQh/uHHDx02EylO6PjqFaW9d38xASIPHmVaFA8vWNqw== boris_kamenetskii@epam.com"
   }
 }
 
@@ -426,6 +528,9 @@ variable "bastion_instance_settings" {
   }
 }
 
+/*=================================
+RDS
+==================================*/
 variable "rds_settings" {
   default = {
     name                    = "ghost"
@@ -446,27 +551,9 @@ variable "rds_settings" {
   }
 }
 
-variable "rds_sg" {
-  default = {
-    name = "rds"
-    ingress = {
-      mysql = {
-        from_port   = 3306
-        to_port     = 3306
-        protocol    = "tcp"
-        self        = false
-        cidr_blocks = []
-        description = "Inbound Mysql traffic"
-      }
-    }
-    egress = {
-    }
-    tags = {
-      "Description" = "allows access to RDS instances"
-    }
-  }
-}
-
+/*=================================
+ECR
+==================================*/
 variable "ecr_settings" {
   default = {
     name                 = "ghost"
@@ -475,68 +562,9 @@ variable "ecr_settings" {
   }
 }
 
-
-variable "vpc_endpoint_settings" {
-  default = {
-    endpoints = {
-      s3 = {
-        service             = "s3"
-        service_type        = "Gateway"
-        private_dns_enabled = false
-      }
-      ecr_dkr = {
-        service             = "ecr.dkr"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-      ecr_api = {
-        service             = "ecr.api"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-      efs = {
-        service             = "elasticfilesystem"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-      ssm = {
-        service             = "ssm"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-      cloudwatch = {
-        service             = "monitoring"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-      cloudwatch_logs = {
-        service             = "logs"
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-    }
-  }
-}
-
-variable "ecs_tg_settings" {
-  default = {
-    name                             = "ecs-ghost-tg"
-    target_type                      = "ip"
-    port                             = 2368
-    protocol                         = "HTTP"
-    deregistration_delay             = 300
-    slow_start                       = 0
-    proxy_protocol_v2                = false
-    health_check_port                = 2368
-    health_check_protocol            = "HTTP"
-    health_check_healthy_threshold   = 10
-    health_check_unhealthy_threshold = 10
-    health_check_interval            = 60
-    health_check_path                = "/ghost/"
-    health_check_matcher             = "200"
-  }
-}
-
+/*=================================
+ECS
+==================================*/
 variable "ecs_settings" {
   default = {
     name               = "ghost"

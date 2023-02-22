@@ -1,3 +1,6 @@
+/*=================================
+IAM
+==================================*/
 data "aws_iam_policy_document" "role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -58,6 +61,9 @@ data "aws_iam_policy_document" "fargate-policy" {
   }
 }
 
+/*=================================
+EC2
+==================================*/
 data "aws_ami" "amazon-linux-2" {
   most_recent = var.ami_settings["most_recent"]
   name_regex  = var.ami_settings["name_regex"]
@@ -87,6 +93,9 @@ data "template_file" "user-data" {
   }
 }
 
+/*=================================
+NETWORK
+==================================*/
 data "aws_vpc_endpoint_service" "vpc_endpoint_service" {
 
   for_each = try(var.vpc_endpoint_settings["endpoints"], {})
